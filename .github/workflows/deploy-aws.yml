@@ -1,0 +1,76 @@
+# Example deployment to AWS ECS Fargate. Requires:
+#   - an ECR repository, ECS cluster/service, and a task definition based on deploy/aws/ecs-task-definition.json
+#   - an IAM role trusted for GitHub OIDC, stored as the AWS_DEPLOY_ROLE_ARN secret
+#   - repository variables: AWS_REGION, ECR_REPOSITORY, ECS_CLUSTER, ECS_SERVICE, ECS_SUBNETS, ECS_SECURITY_GROUPS
+name: Deploy (AWS ECS)
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: choice
+        options: [staging, production]
+        default: staging
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push image
+        id: image
+        env:
+          IMAGE: ${{ steps.ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:${{ github.sha }}
+        run: |
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Render task definition
+        id: taskdef
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: deploy/aws/ecs-task-definition.json
+          container-name: api
+          image: ${{ steps.image.outputs.image }}
+
+      - name: Register task definition
+        id: register
+        run: |
+          arn=$(aws ecs register-task-definition --cli-input-json "file://${{ steps.taskdef.outputs.task-definition }}" \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "arn=$arn" >> "$GITHUB_OUTPUT"
+
+      # Migrations run as a one-off task with the new image before traffic shifts.
+      - name: Run database migrations
+        run: |
+          task=$(aws ecs run-task --cluster "${{ vars.ECS_CLUSTER }}" --launch-type FARGATE \
+            --task-definition "${{ steps.register.outputs.arn }}" \
+            --network-configuration "awsvpcConfiguration={subnets=[${{ vars.ECS_SUBNETS }}],securityGroups=[${{ vars.ECS_SECURITY_GROUPS }}],assignPublicIp=DISABLED}" \
+            --overrides '{"containerOverrides":[{"name":"api","command":["node","dist/db/cli.js","migrate"]}]}' \
+            --query 'tasks[0].taskArn' --output text)
+          aws ecs wait tasks-stopped --cluster "${{ vars.ECS_CLUSTER }}" --tasks "$task"
+          code=$(aws ecs describe-tasks --cluster "${{ vars.ECS_CLUSTER }}" --tasks "$task" \
+            --query 'tasks[0].containers[?name==`api`].exitCode' --output text)
+          test "$code" = "0" || { echo "Migration failed with exit code $code"; exit 1; }
+
+      - name: Deploy service
+        run: |
+          aws ecs update-service --cluster "${{ vars.ECS_CLUSTER }}" --service "${{ vars.ECS_SERVICE }}" \
+            --task-definition "${{ steps.register.outputs.arn }}"
+          aws ecs wait services-stable --cluster "${{ vars.ECS_CLUSTER }}" --services "${{ vars.ECS_SERVICE }}"

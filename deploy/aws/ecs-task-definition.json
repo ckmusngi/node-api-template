@@ -1,0 +1,100 @@
+{
+  "family": "node-api-template",
+  "requiresCompatibilities": ["FARGATE"],
+  "networkMode": "awsvpc",
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::<ACCOUNT_ID>:role/node-api-template-execution",
+  "taskRoleArn": "arn:aws:iam::<ACCOUNT_ID>:role/node-api-template-task",
+  "runtimePlatform": { "cpuArchitecture": "X86_64", "operatingSystemFamily": "LINUX" },
+  "containerDefinitions": [
+    {
+      "name": "api",
+      "image": "<ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/node-api-template:latest",
+      "essential": true,
+      "portMappings": [{ "containerPort": 3000, "protocol": "tcp" }],
+      "stopTimeout": 30,
+      "environment": [
+        { "name": "NODE_ENV", "value": "production" },
+        { "name": "PORT", "value": "3000" },
+        { "name": "APP_URL", "value": "https://api.example.com" },
+        { "name": "TRUST_PROXY", "value": "1" },
+        { "name": "LOG_LEVEL", "value": "info" },
+        { "name": "CORS_ORIGINS", "value": "https://app.example.com" },
+        { "name": "COOKIE_SECURE", "value": "true" },
+        { "name": "DB_HOST", "value": "<RDS_ENDPOINT>" },
+        { "name": "DB_NAME", "value": "node_api_template" },
+        { "name": "DB_SSL", "value": "true" },
+        { "name": "DB_POOL_MAX", "value": "10" },
+        { "name": "REDIS_ENABLED", "value": "true" },
+        { "name": "QUEUE_ENABLED", "value": "true" },
+        { "name": "STORAGE_DRIVER", "value": "s3" },
+        { "name": "S3_BUCKET", "value": "<UPLOADS_BUCKET>" },
+        { "name": "AWS_REGION", "value": "<REGION>" },
+        { "name": "MAIL_TRANSPORT", "value": "smtp" },
+        { "name": "SMTP_HOST", "value": "email-smtp.<REGION>.amazonaws.com" },
+        { "name": "OTEL_ENABLED", "value": "true" },
+        { "name": "OTEL_EXPORTER_OTLP_ENDPOINT", "value": "http://localhost:4318" }
+      ],
+      "secrets": [
+        {
+          "name": "DB_USER",
+          "valueFrom": "arn:aws:secretsmanager:<REGION>:<ACCOUNT_ID>:secret:node-api-template/db:username::"
+        },
+        {
+          "name": "DB_PASSWORD",
+          "valueFrom": "arn:aws:secretsmanager:<REGION>:<ACCOUNT_ID>:secret:node-api-template/db:password::"
+        },
+        {
+          "name": "JWT_ACCESS_SECRET",
+          "valueFrom": "arn:aws:secretsmanager:<REGION>:<ACCOUNT_ID>:secret:node-api-template/app:JWT_ACCESS_SECRET::"
+        },
+        {
+          "name": "WEBHOOK_SECRET",
+          "valueFrom": "arn:aws:secretsmanager:<REGION>:<ACCOUNT_ID>:secret:node-api-template/app:WEBHOOK_SECRET::"
+        },
+        {
+          "name": "REDIS_URL",
+          "valueFrom": "arn:aws:secretsmanager:<REGION>:<ACCOUNT_ID>:secret:node-api-template/app:REDIS_URL::"
+        },
+        {
+          "name": "SMTP_USER",
+          "valueFrom": "arn:aws:secretsmanager:<REGION>:<ACCOUNT_ID>:secret:node-api-template/ses:username::"
+        },
+        {
+          "name": "SMTP_PASSWORD",
+          "valueFrom": "arn:aws:secretsmanager:<REGION>:<ACCOUNT_ID>:secret:node-api-template/ses:password::"
+        }
+      ],
+      "healthCheck": {
+        "command": ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/health || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 20
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/node-api-template",
+          "awslogs-region": "<REGION>",
+          "awslogs-stream-prefix": "api"
+        }
+      }
+    },
+    {
+      "name": "otel-collector",
+      "image": "public.ecr.aws/aws-observability/aws-otel-collector:latest",
+      "essential": false,
+      "command": ["--config=/etc/ecs/ecs-default-config.yaml"],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/node-api-template",
+          "awslogs-region": "<REGION>",
+          "awslogs-stream-prefix": "otel"
+        }
+      }
+    }
+  ]
+}

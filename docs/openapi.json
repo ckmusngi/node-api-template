@@ -1,0 +1,2857 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "node-api-template",
+    "version": "1.0.0",
+    "description": "\nProduction-ready REST API template.\n\n## Authentication\n1. `POST /auth/register` then `POST /auth/login` to receive an **access token** (JWT, 15m) and a **refresh token** (7d).\n2. Send `Authorization: Bearer <accessToken>` on protected endpoints (use the **Authorize** button above).\n3. When the access token expires (`401 TOKEN_EXPIRED`), call `POST /auth/refresh`. Refresh tokens rotate on every use; reusing an old one revokes the session.\n\n## Conventions\n- Success: `{ \"success\": true, \"data\": ..., \"meta\"?: ..., \"requestId\": \"...\" }`\n- Error: `{ \"success\": false, \"error\": { \"code\", \"message\", \"details\"? }, \"requestId\": \"...\" }`\n- Lists accept `page`, `limit` (max 100), `sort` (`-createdAt,title`) and `search`.\n- Every response carries `X-Request-ID`; send your own to correlate logs.\n"
+  },
+  "servers": [
+    {
+      "url": "/api/v1",
+      "description": "API v1"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Auth"
+    },
+    {
+      "name": "Users"
+    },
+    {
+      "name": "Users (admin)"
+    },
+    {
+      "name": "Notes",
+      "description": "Example resource showing CRUD, ownership checks and soft deletes"
+    },
+    {
+      "name": "Uploads"
+    },
+    {
+      "name": "Webhooks"
+    },
+    {
+      "name": "Audit"
+    },
+    {
+      "name": "Health"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Access token from POST /auth/login or /auth/refresh. Send as `Authorization: Bearer <token>`."
+      },
+      "refreshCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "refresh_token",
+        "description": "httpOnly refresh token cookie set by login/refresh (path /api/v1/auth)."
+      }
+    },
+    "schemas": {
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [false]
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "example": "VALIDATION_ERROR"
+              },
+              "message": {
+                "type": "string",
+                "example": "Validation failed"
+              },
+              "details": {}
+            },
+            "required": ["code", "message"]
+          },
+          "requestId": {
+            "type": "string",
+            "example": "8d4f0b8e-1f0c-4b8e-9f62-2a6b52b3f7a1"
+          }
+        },
+        "required": ["success", "error", "requestId"]
+      },
+      "PaginationMeta": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "type": "integer",
+            "example": 1
+          },
+          "limit": {
+            "type": "integer",
+            "example": 20
+          },
+          "total": {
+            "type": "integer",
+            "example": 42
+          },
+          "totalPages": {
+            "type": "integer",
+            "example": 3
+          },
+          "hasNextPage": {
+            "type": "boolean"
+          },
+          "hasPrevPage": {
+            "type": "boolean"
+          }
+        },
+        "required": ["page", "limit", "total", "totalPages", "hasNextPage", "hasPrevPage"]
+      },
+      "User": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "example": "3f1c2b8e-8a7d-4a51-9f5b-2f6a1d0c9e44"
+          },
+          "tenantId": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "email": {
+            "type": "string",
+            "example": "jane@example.com"
+          },
+          "firstName": {
+            "type": "string",
+            "example": "Jane"
+          },
+          "lastName": {
+            "type": "string",
+            "example": "Doe"
+          },
+          "role": {
+            "type": "string",
+            "enum": ["user", "admin"]
+          },
+          "status": {
+            "type": "string",
+            "enum": ["active", "inactive", "suspended"]
+          },
+          "emailVerifiedAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "lastLoginAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "passwordChangedAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "tenantId",
+          "email",
+          "firstName",
+          "lastName",
+          "role",
+          "status",
+          "emailVerifiedAt",
+          "lastLoginAt",
+          "passwordChangedAt",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "RegisterRequest": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "maxLength": 254,
+            "format": "email",
+            "example": "jane@example.com"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 72,
+            "pattern": "[a-z]",
+            "example": "Sup3rSecret!"
+          },
+          "firstName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "example": "Jane"
+          },
+          "lastName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "example": "Doe"
+          }
+        },
+        "required": ["email", "password", "firstName", "lastName"]
+      },
+      "AuthResult": {
+        "type": "object",
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/User"
+          },
+          "tokens": {
+            "$ref": "#/components/schemas/Tokens"
+          }
+        },
+        "required": ["user", "tokens"]
+      },
+      "Tokens": {
+        "type": "object",
+        "properties": {
+          "tokenType": {
+            "type": "string",
+            "enum": ["Bearer"]
+          },
+          "accessToken": {
+            "type": "string",
+            "example": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+          },
+          "expiresIn": {
+            "type": "integer",
+            "example": 900,
+            "description": "Access token lifetime in seconds"
+          },
+          "refreshToken": {
+            "type": "string",
+            "example": "b3JkZXItYS1yYW5kb20tb3BhcXVlLXRva2Vu..."
+          },
+          "refreshTokenExpiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": ["tokenType", "accessToken", "expiresIn", "refreshToken", "refreshTokenExpiresAt"]
+      },
+      "LoginRequest": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "maxLength": 254,
+            "format": "email",
+            "example": "jane@example.com"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 72,
+            "example": "Sup3rSecret!"
+          }
+        },
+        "required": ["email", "password"]
+      },
+      "RefreshRequest": {
+        "type": "object",
+        "properties": {
+          "refreshToken": {
+            "type": "string",
+            "minLength": 16,
+            "maxLength": 256,
+            "description": "Optional when the refresh_token cookie is sent (browsers). Required for non-browser clients."
+          }
+        }
+      },
+      "Message": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": ["message"]
+      },
+      "EmailRequest": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "maxLength": 254,
+            "format": "email",
+            "example": "jane@example.com"
+          }
+        },
+        "required": ["email"]
+      },
+      "ResetPasswordRequest": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "minLength": 16,
+            "maxLength": 256
+          },
+          "password": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 72,
+            "pattern": "[a-z]",
+            "example": "Sup3rSecret!"
+          }
+        },
+        "required": ["token", "password"]
+      },
+      "TokenRequest": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "minLength": 16,
+            "maxLength": 256
+          }
+        },
+        "required": ["token"]
+      },
+      "UpdateProfileRequest": {
+        "type": "object",
+        "properties": {
+          "firstName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "lastName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          }
+        },
+        "additionalProperties": false
+      },
+      "ChangePasswordRequest": {
+        "type": "object",
+        "properties": {
+          "currentPassword": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 72
+          },
+          "newPassword": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 72,
+            "pattern": "[a-z]",
+            "example": "Sup3rSecret!"
+          }
+        },
+        "required": ["currentPassword", "newPassword"]
+      },
+      "UpdateUserStatusRequest": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["active", "inactive", "suspended"]
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 255
+          }
+        },
+        "required": ["status"]
+      },
+      "UpdateUserRoleRequest": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": ["user", "admin"]
+          }
+        },
+        "required": ["role"]
+      },
+      "Note": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "example": "3f1c2b8e-8a7d-4a51-9f5b-2f6a1d0c9e44"
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid",
+            "example": "3f1c2b8e-8a7d-4a51-9f5b-2f6a1d0c9e44"
+          },
+          "tenantId": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "example": "Meeting notes"
+          },
+          "content": {
+            "type": "string",
+            "example": "Discussed the Q3 roadmap."
+          },
+          "status": {
+            "type": "string",
+            "enum": ["draft", "published", "archived"]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": ["id", "userId", "tenantId", "title", "content", "status", "createdAt", "updatedAt"]
+      },
+      "CreateNoteRequest": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "content": {
+            "type": "string",
+            "maxLength": 50000
+          },
+          "status": {
+            "type": "string",
+            "enum": ["draft", "published", "archived"],
+            "default": "draft"
+          }
+        },
+        "required": ["title", "content"],
+        "additionalProperties": false
+      },
+      "UpdateNoteRequest": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "content": {
+            "type": "string",
+            "maxLength": 50000
+          },
+          "status": {
+            "type": "string",
+            "enum": ["draft", "published", "archived"]
+          }
+        },
+        "additionalProperties": false
+      },
+      "AuditLog": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "tenantId": {
+            "type": ["string", "null"]
+          },
+          "actorId": {
+            "type": ["string", "null"]
+          },
+          "action": {
+            "type": "string",
+            "example": "user.status_changed"
+          },
+          "entityType": {
+            "type": ["string", "null"]
+          },
+          "entityId": {
+            "type": ["string", "null"]
+          },
+          "metadata": {
+            "type": ["object", "null"],
+            "additionalProperties": {}
+          },
+          "ip": {
+            "type": ["string", "null"]
+          },
+          "userAgent": {
+            "type": ["string", "null"]
+          },
+          "requestId": {
+            "type": ["string", "null"]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "tenantId",
+          "actorId",
+          "action",
+          "entityType",
+          "entityId",
+          "metadata",
+          "ip",
+          "userAgent",
+          "requestId",
+          "createdAt"
+        ]
+      },
+      "Upload": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer"
+          },
+          "contentType": {
+            "type": "string"
+          },
+          "originalName": {
+            "type": "string"
+          }
+        },
+        "required": ["key", "url", "size", "contentType", "originalName"]
+      },
+      "WebhookEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "example": "evt_01J8Z3"
+          },
+          "type": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "example": "invoice.paid"
+          },
+          "data": {}
+        },
+        "required": ["id", "type"]
+      }
+    },
+    "parameters": {}
+  },
+  "paths": {
+    "/auth/register": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Register a new account",
+        "description": "Creates a user and emails a verification link. With multi-tenancy enabled, send `X-Tenant-Slug` to join a tenant.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Account created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "user": {
+                          "$ref": "#/components/schemas/User"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["user", "message"]
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["success", "data", "requestId"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Sign in with email and password",
+        "description": "Returns a short-lived JWT access token and a rotating refresh token. The refresh token is also set as an httpOnly cookie scoped to `/api/v1/auth`. Repeated failures lock the account temporarily (423).",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/AuthResult"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["success", "data", "requestId"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "423": {
+            "description": "Account temporarily locked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/refresh": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Rotate the refresh token and get a new access token",
+        "description": "Send the refresh token in the body or via the cookie. Each refresh token can be used once; reusing a rotated token revokes the whole session family.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "New token pair",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/AuthResult"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["success", "data", "requestId"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Revoke the current refresh token",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Signed out"
+          }
+        }
+      }
+    },
+    "/auth/logout-all": {
+      "post": {
+        "tags": ["Auth"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Revoke every refresh token for the current user",
+        "responses": {
+          "204": {
+            "description": "All sessions revoked"
+          },
+          "401": {
+            "description": "Missing, invalid or expired access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/forgot-password": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Request a password reset email",
+        "description": "Always returns 202 so the endpoint cannot be used to discover registered emails.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Message"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["success", "data", "requestId"]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/reset-password": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Set a new password using a reset token",
+        "description": "Revokes all existing sessions for the account.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetPasswordRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Password reset",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Message"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["success", "data", "requestId"]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/verify-email": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Verify an email address",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Verified",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Message"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["success", "data", "requestId"]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/resend-verification": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Resend the verification email",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Message"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["success", "data", "requestId"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users/me": {
+      "get": {
+        "tags": ["Users"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get the current user",
+        "responses": {
+          "200": {
+            "description": "Profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/User"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["success", "data", "requestId"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": ["Users"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Update the current user profile",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProfileRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/User"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["success", "data", "requestId"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["Users"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Delete (soft) the current account",
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "description": "Missing, invalid or expired access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users/me/change-password": {
+      "post": {
+        "tags": ["Users"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Change password (signs out other sessions)",
+        "description": "Revokes every existing session, including the current access token, and returns a fresh token pair.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangePasswordRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Password changed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/Message"
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "tokens": {
+                              "$ref": "#/components/schemas/Tokens"
+                            }
+                          },
+                          "required": ["tokens"]
+                        }
+                      ]
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["success", "data", "requestId"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users": {
+      "get": {
+        "tags": ["Users (admin)"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List users",
+        "description": "Requires `users:read`. Supports `page`, `limit`, `sort` (e.g. `-createdAt,email`), `search` (email/name), `role`, `status`, `includeDeleted`.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "example": 1
+            },
+            "required": false,
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "example": 20
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^-?(createdAt|email|lastName|lastLoginAt)(,-?(createdAt|email|lastName|lastLoginAt))*$",
+              "example": "-createdAt"
+            },
+            "required": false,
+            "name": "sort",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "required": false,
+            "name": "search",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": ["user", "admin"]
+            },
+            "required": false,
+            "name": "role",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": ["active", "inactive", "suspended"]
+            },
+            "required": false,
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": ["true", "false"]
+            },
+            "required": false,
+            "name": "includeDeleted",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Users",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/User"
+                      }
+                    },
+                    "meta": {
+                      "type": "object",
+                      "properties": {
+                        "pagination": {
+                          "$ref": "#/components/schemas/PaginationMeta"
+                        }
+                      },
+                      "required": ["pagination"]
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["success", "data", "meta", "requestId"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users/{id}": {
+      "get": {
+        "tags": ["Users (admin)"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get a user",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "example": "3f1c2b8e-8a7d-4a51-9f5b-2f6a1d0c9e44"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/User"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["success", "data", "requestId"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["Users (admin)"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Soft delete a user",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "example": "3f1c2b8e-8a7d-4a51-9f5b-2f6a1d0c9e44"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "description": "Missing, invalid or expired access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users/{id}/status": {
+      "patch": {
+        "tags": ["Users (admin)"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Activate, deactivate or suspend a user",
+        "description": "Setting `inactive` or `suspended` revokes all of the user’s sessions.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "example": "3f1c2b8e-8a7d-4a51-9f5b-2f6a1d0c9e44"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateUserStatusRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "User",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/User"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["success", "data", "requestId"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users/{id}/role": {
+      "patch": {
+        "tags": ["Users (admin)"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Change a user role",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "example": "3f1c2b8e-8a7d-4a51-9f5b-2f6a1d0c9e44"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateUserRoleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "User",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/User"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["success", "data", "requestId"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users/{id}/restore": {
+      "post": {
+        "tags": ["Users (admin)"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Restore a soft-deleted user",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "example": "3f1c2b8e-8a7d-4a51-9f5b-2f6a1d0c9e44"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/User"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["success", "data", "requestId"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/notes": {
+      "get": {
+        "tags": ["Notes"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List notes",
+        "description": "Example of pagination, filtering, sorting and search. Try `?search=meeting&status=draft,published&sort=-createdAt&page=1&limit=10`.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "example": 1
+            },
+            "required": false,
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "example": 20
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^-?(createdAt|updatedAt|title|status)(,-?(createdAt|updatedAt|title|status))*$",
+              "example": "-createdAt"
+            },
+            "required": false,
+            "name": "sort",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "required": false,
+            "name": "search",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^(draft|published|archived)(,(draft|published|archived))*$",
+              "description": "Comma-separated statuses",
+              "example": "draft,published"
+            },
+            "required": false,
+            "description": "Comma-separated statuses",
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "required": false,
+            "name": "createdFrom",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "required": false,
+            "name": "createdTo",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": ["own", "all"],
+              "default": "own",
+              "description": "`all` requires the notes:read:any permission"
+            },
+            "required": false,
+            "description": "`all` requires the notes:read:any permission",
+            "name": "scope",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Notes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Note"
+                      }
+                    },
+                    "meta": {
+                      "type": "object",
+                      "properties": {
+                        "pagination": {
+                          "$ref": "#/components/schemas/PaginationMeta"
+                        }
+                      },
+                      "required": ["pagination"]
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["success", "data", "meta", "requestId"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["Notes"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Create a note",
+        "description": "Send an `Idempotency-Key` header to make retries safe: repeated requests with the same key replay the original response.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 255,
+              "example": "create-note-7f3a9c21"
+            },
+            "required": false,
+            "name": "Idempotency-Key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateNoteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Note"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["success", "data", "requestId"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/notes/{id}": {
+      "get": {
+        "tags": ["Notes"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get a note",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "example": "3f1c2b8e-8a7d-4a51-9f5b-2f6a1d0c9e44"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Note",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Note"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["success", "data", "requestId"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": ["Notes"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Update a note",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "example": "3f1c2b8e-8a7d-4a51-9f5b-2f6a1d0c9e44"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateNoteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Note",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Note"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["success", "data", "requestId"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["Notes"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Soft delete a note",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "example": "3f1c2b8e-8a7d-4a51-9f5b-2f6a1d0c9e44"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "description": "Missing, invalid or expired access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/notes/{id}/restore": {
+      "post": {
+        "tags": ["Notes"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Restore a soft-deleted note",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "example": "3f1c2b8e-8a7d-4a51-9f5b-2f6a1d0c9e44"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Note",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Note"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["success", "data", "requestId"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/audit-logs": {
+      "get": {
+        "tags": ["Audit"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List audit log entries (newest first)",
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "example": 1
+            },
+            "required": false,
+            "name": "page",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "example": 20
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 100,
+              "example": "auth.login"
+            },
+            "required": false,
+            "name": "action",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "example": "3f1c2b8e-8a7d-4a51-9f5b-2f6a1d0c9e44"
+            },
+            "required": false,
+            "name": "actorId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "required": false,
+            "name": "entityType",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "required": false,
+            "name": "entityId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "required": false,
+            "name": "from",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "required": false,
+            "name": "to",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Audit entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AuditLog"
+                      }
+                    },
+                    "meta": {
+                      "type": "object",
+                      "properties": {
+                        "pagination": {
+                          "$ref": "#/components/schemas/PaginationMeta"
+                        }
+                      },
+                      "required": ["pagination"]
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["success", "data", "meta", "requestId"]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/uploads": {
+      "post": {
+        "tags": ["Uploads"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Upload a file",
+        "description": "multipart/form-data with a single `file` field. Max 5242880 bytes. Allowed: image/png, image/jpeg, image/webp, application/pdf. The type is verified from file contents.",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                },
+                "required": ["file"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Upload"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["success", "data", "requestId"]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "File too large"
+          },
+          "415": {
+            "description": "File type not allowed"
+          }
+        }
+      }
+    },
+    "/webhooks/{provider}": {
+      "post": {
+        "tags": ["Webhooks"],
+        "summary": "Receive a signed webhook",
+        "description": "Header `X-Webhook-Signature: t=<unix>,v1=<hex HMAC-SHA256(secret, \"<t>.<raw body>\")>`. Requests older than WEBHOOK_TOLERANCE_SECONDS are rejected, and duplicate event ids are acknowledged without reprocessing.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "billing"
+            },
+            "required": true,
+            "name": "provider",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "example": "t=1760000000,v1=5f2b..."
+            },
+            "required": true,
+            "name": "X-Webhook-Signature",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookEvent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Duplicate delivery acknowledged",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "received": {
+                          "type": "boolean"
+                        },
+                        "duplicate": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": ["received", "duplicate"]
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["success", "data", "requestId"]
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "received": {
+                          "type": "boolean"
+                        },
+                        "duplicate": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": ["received", "duplicate"]
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["success", "data", "requestId"]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or expired access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": ["Health"],
+        "summary": "Liveness probe",
+        "description": "Served at the server root (not under /api/v1).",
+        "servers": [
+          {
+            "url": "/"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Alive",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": ["ok"]
+                    },
+                    "uptime": {
+                      "type": "number"
+                    },
+                    "timestamp": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["status", "uptime", "timestamp"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "tags": ["Health"],
+        "summary": "Readiness probe (database, Redis)",
+        "servers": [
+          {
+            "url": "/"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "checks": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "object",
+                        "properties": {
+                          "ok": {
+                            "type": "boolean"
+                          },
+                          "latencyMs": {
+                            "type": "number"
+                          },
+                          "error": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["ok", "latencyMs"]
+                      }
+                    },
+                    "timestamp": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["status", "checks", "timestamp"]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "A dependency is unavailable or the instance is shutting down"
+          }
+        }
+      }
+    }
+  },
+  "webhooks": {}
+}

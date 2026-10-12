@@ -1,0 +1,88 @@
+# Option A: dependencies only, run the app with `npm run dev`
+#   docker compose up -d mysql redis
+#
+# Option B: everything in containers (MySQL, Redis, migrations, API, worker)
+#   docker compose --profile app up --build
+#
+# Host ports can be changed if 3306/6379/3000 are taken, e.g.
+#   MYSQL_PORT=3307 REDIS_PORT=6380 API_PORT=3001 docker compose --profile app up --build
+
+x-app: &app
+  build: .
+  env_file:
+    - path: .env
+      required: false
+  environment: &app-env
+    NODE_ENV: production
+    DB_HOST: mysql
+    DB_PORT: '3306'
+    DB_NAME: node_api_template
+    DB_USER: app
+    DB_PASSWORD: app
+    REDIS_ENABLED: 'true'
+    REDIS_URL: redis://redis:6379
+    QUEUE_ENABLED: 'true'
+    LOG_PRETTY: 'false' # pino-pretty is a dev dependency and not in the image
+    # Browsers accept Secure cookies on http://localhost, so this works locally.
+    COOKIE_SECURE: 'true'
+    JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-local-docker-secret-change-me-0123456789abcdef}
+    APP_URL: http://localhost:${API_PORT:-3000}
+    CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: node_api_template
+      MYSQL_USER: app
+      MYSQL_PASSWORD: app
+    command: ['--character-set-server=utf8mb4', '--collation-server=utf8mb4_unicode_ci']
+    ports: ['${MYSQL_PORT:-3306}:3306']
+    volumes: [mysql-data:/var/lib/mysql]
+    healthcheck:
+      test: ['CMD', 'mysqladmin', 'ping', '-h', '127.0.0.1', '-proot']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    ports: ['${REDIS_PORT:-6379}:6379']
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Runs migrations and the seeder once, then exits. The API waits for it to succeed.
+  migrate:
+    <<: *app
+    profiles: [app]
+    command: ['sh', '-c', 'node dist/db/cli.js migrate && node dist/db/cli.js seed']
+    environment:
+      <<: *app-env
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-Password123!}
+    depends_on:
+      mysql: { condition: service_healthy }
+
+  api:
+    <<: *app
+    profiles: [app]
+    ports: ['${API_PORT:-3000}:3000']
+    volumes: [uploads:/app/uploads]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+
+  worker:
+    <<: *app
+    profiles: [app]
+    command: ['node', '--require', './dist/instrumentation.js', 'dist/worker.js']
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+
+volumes:
+  mysql-data:
+  uploads:
