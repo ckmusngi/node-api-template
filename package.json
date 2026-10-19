@@ -54,7 +54,7 @@
     "@opentelemetry/semantic-conventions": "^1.43.0",
     "axios": "^1.20.0",
     "bcrypt": "^6.0.0",
-    "bullmq": "^6.3.12",
+    "bullmq": "^6.3.15",
     "compression": "^1.8.2",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
